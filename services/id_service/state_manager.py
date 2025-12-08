@@ -1,4 +1,5 @@
 import os
+from urllib import request
 
 DATA_DIR = "data"
 STATE_FILE = os.path.join(DATA_DIR, "server_state.wal")
@@ -13,6 +14,8 @@ class StateManager:
     
     def __init__(self, filepath: str = STATE_FILE):
         self.filepath = filepath
+        self.id_buffer = []
+        self.buffer_size = 1000
 
         # Создаем папку data, если её вдруг нет
         if not os.path.exists(DATA_DIR):
@@ -35,3 +38,13 @@ class StateManager:
         # но для MVP и одного инстанса ID Gen это ок.
         with open(self.filepath, "w") as f:
             f.write(str(new_max))
+
+    def get_next_id(self) -> int:
+        if not self.id_buffer:
+            response = request.post("http://id_generator:8000/allocate",json={"size": self.buffer_size})
+            response.raise_for_status()
+            data = response.json()
+            start, end = data["start"], data["end"]
+            self.id_buffer = list(range(start, end + 1))
+            self.update_max(end)
+        return self.id_buffer.pop(0)
