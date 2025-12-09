@@ -33,3 +33,16 @@ services:
       # Подключаем папку data, так как Роутер должен писать в БД
       - ./services/data:/app/data
     restart: always
+
+  api_service:
+    container_name: compact_api
+    build: 
+      # Важно: путь должен вести туда, где лежит Dockerfile API
+      context: ./services/api_service 
+    ports:
+      - "8080:8080"  # Мы заходим на сайт через порт 8080
+    depends_on:
+      - id_generator
+      - router_service
+    # Если упадет - поднять
+    restart: always
