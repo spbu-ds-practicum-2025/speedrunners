@@ -18,7 +18,7 @@ class AsyncStorage:
         """
         Применение оптимизаций SQLite для высокой производительности и конкурентности.
         """
-        # WAL режим - самое важное для конкурентной записи
+        # WAL режим
         await db.execute("PRAGMA journal_mode=WAL;")
         # Баланс между скоростью и надежностью
         await db.execute("PRAGMA synchronous=NORMAL;")
@@ -29,7 +29,7 @@ class AsyncStorage:
 
     async def execute_write(self, query: str, params: tuple = ()) -> None:
         """
-        Выполнение записи с механизмом повторных попыток (Retry) при блокировке.
+        Выполнение записи с механизмом повторных попыток при блокировке.
         """
         retries = 5
         delay = 0.05  # 50 мс
@@ -71,13 +71,10 @@ class AsyncStorage:
             db.row_factory = aiosqlite.Row
             async with db.execute(query, params) as cursor:
                 return await cursor.fetchall()
-    # ... (предыдущий код класса AsyncStorage) ...
-
-# ... (код __init__, _init_pragmas, execute_write, fetch_one, fetch_all оставляем как был) ...
 
     async def initialize_table(self):
         """
-        Создает таблицу links с обновленной схемой.
+        Создает таблицу links.
         """
         query = """
         CREATE TABLE IF NOT EXISTS links (

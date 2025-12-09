@@ -6,7 +6,7 @@ from storage import AsyncStorage
 storage = AsyncStorage("shard_0.db")
 
 class LinkSchema(BaseModel):
-    id: int               # <--- Добавили поле ID (пока вручную)
+    id: int           
     short_code: str
     original_url: str
 
@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     print("Storage initialized: shard_0.db ready.")
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, title="Router")
 
 @app.post("/save_link")
 async def save_link(link: LinkSchema):
