@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Сокращатель ссылок</title>
+</head>
+<body>
+    <h1>URL Shortener</h1>
+
+    <input id="urlInput" type="text" placeholder="Введите длинную ссылку" style="width: 300px;">
+    <button onclick="shorten()">Сократить</button>
+
+    <p id="result"></p>
+
+    <script>
+        async function shorten() {
+            const input = document.getElementById("urlInput").value;
+
+            const response = await fetch("/shorten", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ url: input })
+            });
+
+            const data = await response.json();
+            document.getElementById("result").innerText =
+                "Короткая ссылка: " + data.short_url;
+        }
+    </script>
+</body>
+</html>
