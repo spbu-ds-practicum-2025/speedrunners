@@ -2,6 +2,7 @@ import asyncio
 import logging
 import aiosqlite
 from typing import Any, List, Optional
+import os
 
 # Настраиваем логгер
 logger = logging.getLogger(__name__)
@@ -105,3 +106,30 @@ class AsyncStorage:
             # row['original_url'] работает благодаря db.row_factory = aiosqlite.Row
             return row['original_url']
         return None
+    
+
+    async def create_shard_if_not_exists(self, shard_name: str):
+        """
+        Создает новый файл шарда и таблицу в нем, если файла нет.
+        """
+        new_db_path = os.path.join(os.path.dirname(self.default_shard_path), shard_name)
+        
+        if os.path.exists(new_db_path):
+            return  # Уже создан, выходим
+
+        print(f"[STORAGE] Pre-allocating new shard: {shard_name}")
+        async with aiosqlite.connect(new_db_path) as db:
+            # Включаем WAL сразу
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA synchronous=NORMAL;")
+            
+            # Создаем таблицу
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS links (
+                    id INTEGER PRIMARY KEY,
+                    short_code TEXT UNIQUE,
+                    original_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.commit()

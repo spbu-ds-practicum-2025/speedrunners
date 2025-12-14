@@ -1,10 +1,14 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from storage import AsyncStorage
+from sharding import get_target_shard, should_preallocate
 
 # Подключаем файл storage.py, который ты прислал (он отличный)
-storage = AsyncStorage("/app/data/shard_0.db") # Указываем полный путь к Volume
+import os
+DATA_PATH = os.getenv("DATA_PATH", "/app/data/shard_0.db")
+
+storage = AsyncStorage(DATA_PATH) # Указываем полный путь к Volume
 
 class LinkSchema(BaseModel):
     id: int           
@@ -21,12 +25,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="Router")
 
 @app.post("/save_link")
-async def save_link(link: LinkSchema):
+async def save_link(link: LinkSchema, background_tasks: BackgroundTasks):
     try:
+        # 1. Вычисляем целевой шард
+        target_shard = get_target_shard(link.id)
+        
+        # 2. Проверяем преаллокацию (нужен ли следующий?)
+        next_shard_idx = should_preallocate(link.id)
+        if next_shard_idx != -1:
+            next_shard_name = f"shard_{next_shard_idx}.db"
+            # Добавляем задачу в фон: создать файл, если его нет
+            background_tasks.add_task(storage.create_shard_if_not_exists, next_shard_name)
         # Пишем в базу
         await storage.insert_link(link.id, link.short_code, link.original_url)
+        
+        return {"status": "ok", "shard": target_shard}
         print(f"[ROUTER] Saved {link.short_code}")
         return {"status": "ok", "message": "Link saved"}
+    
     except Exception as e:
         print(f"[ROUTER] Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
