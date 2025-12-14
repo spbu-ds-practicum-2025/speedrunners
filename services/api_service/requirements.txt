@@ -3,3 +3,5 @@ uvicorn
 pydantic
 httpx
 jinja2
+pytest
+pytest-asyncio
