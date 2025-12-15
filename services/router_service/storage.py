@@ -1,135 +1,105 @@
 import asyncio
 import logging
 import aiosqlite
-from typing import Any, List, Optional
 import os
+from typing import Any, List, Optional
 
-# Настраиваем логгер
 logger = logging.getLogger(__name__)
 
 class AsyncStorage:
-    def __init__(self, db_path: str):
+    def __init__(self, root_dir: str):
         """
-        Инициализация подключения к конкретному файлу шарда.
-        :param db_path: Путь к файлу базы данных (например, 'data/shard_0.db')
+        Инициализация менеджера хранилища.
+        :param root_dir: Путь к ПАПКЕ, где лежат все шарды (например, '/app/data')
         """
-        self.db_path = db_path
+        self.root_dir = root_dir
+        # Создаем директорию для данных, если её нет
+        os.makedirs(self.root_dir, exist_ok=True)
+
+    def _get_db_path(self, shard_name: str) -> str:
+        """Собирает полный путь к файлу шарда."""
+        return os.path.join(self.root_dir, shard_name)
 
     async def _init_pragmas(self, db: aiosqlite.Connection):
-        """
-        Применение оптимизаций SQLite для высокой производительности и конкурентности.
-        """
-        # WAL режим
+        """Оптимизации SQLite для работы с уже открытым соединением."""
         await db.execute("PRAGMA journal_mode=WAL;")
-        # Баланс между скоростью и надежностью
         await db.execute("PRAGMA synchronous=NORMAL;")
-        # Увеличенный кэш
         await db.execute("PRAGMA cache_size=-64000;")
-        # Таймаут на уровне драйвера
         await db.execute("PRAGMA busy_timeout=5000;")
 
-    async def execute_write(self, query: str, params: tuple = ()) -> None:
+    async def create_new_shard(self, shard_name: str):
         """
-        Выполнение записи с механизмом повторных попыток при блокировке.
+        Физически создает новый файл шарда, включает WAL и создает таблицу.
         """
+        db_path = self._get_db_path(shard_name)
+        
+        # Логируем (полезно для отладки преаллокации)
+        if os.path.exists(db_path):
+            logger.info(f"[STORAGE] Shard {shard_name} already exists. Checking schema...")
+        else:
+            logger.info(f"[STORAGE] Creating NEW shard: {shard_name}")
+
+        async with aiosqlite.connect(db_path) as db:
+            # 1. Сразу включаем WAL (как в требовании)
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA synchronous=NORMAL;")
+            
+            # 2. Накатываем CREATE TABLE
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS links (
+                    id INTEGER PRIMARY KEY,
+                    short_code TEXT UNIQUE NOT NULL,
+                    original_url TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.commit()
+
+    async def execute_write(self, shard_name: str, query: str, params: tuple = ()) -> None:
+        """Запись данных в конкретный шард с ретраями."""
+        db_path = self._get_db_path(shard_name)
         retries = 5
-        delay = 0.05  # 50 мс
+        delay = 0.05
 
         for attempt in range(1, retries + 1):
             try:
-                async with aiosqlite.connect(self.db_path) as db:
+                async with aiosqlite.connect(db_path) as db:
                     await self._init_pragmas(db)
                     await db.execute(query, params)
                     await db.commit()
-                    return  # Успех
-
+                    return
             except aiosqlite.OperationalError as e:
-                # Если база занята (LOCKED), ждем и пробуем снова
                 if "database is locked" in str(e) or "busy" in str(e).lower():
                     if attempt < retries:
-                        logger.warning(
-                            f"Database {self.db_path} locked. Retry {attempt}/{retries}..."
-                        )
                         await asyncio.sleep(delay)
                     else:
-                        logger.error(f"Failed to write to {self.db_path} after retries.")
+                        logger.error(f"Failed to write to {shard_name} after {retries} attempts.")
                         raise e
                 else:
                     raise e
 
-    async def fetch_one(self, query: str, params: tuple = ()) -> Optional[Any]:
-        """Чтение одной строки."""
-        async with aiosqlite.connect(self.db_path) as db:
+    async def fetch_one(self, shard_name: str, query: str, params: tuple = ()) -> Optional[Any]:
+        """Чтение одной строки из конкретного шарда."""
+        db_path = self._get_db_path(shard_name)
+        
+        if not os.path.exists(db_path):
+            return None
+
+        async with aiosqlite.connect(db_path) as db:
             await self._init_pragmas(db)
             db.row_factory = aiosqlite.Row
             async with db.execute(query, params) as cursor:
                 return await cursor.fetchone()
 
-    async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
-        """Чтение всех строк."""
-        async with aiosqlite.connect(self.db_path) as db:
-            await self._init_pragmas(db)
-            db.row_factory = aiosqlite.Row
-            async with db.execute(query, params) as cursor:
-                return await cursor.fetchall()
-
-    async def initialize_table(self):
-        """
-        Создает таблицу links.
-        """
-        query = """
-        CREATE TABLE IF NOT EXISTS links (
-            id INTEGER PRIMARY KEY,           -- Тот самый ID от генератора
-            short_code TEXT UNIQUE NOT NULL,  -- Уникальный код (abc1)
-            original_url TEXT NOT NULL,       -- Длинная ссылка
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- Дата создания
-        );
-        """
-        await self.execute_write(query)
-
-    async def insert_link(self, link_id: int, short_code: str, original_url: str) -> None:
-        """
-        Вставка новой записи с указанием ID.
-        """
+    async def insert_link(self, shard_name: str, link_id: int, short_code: str, original_url: str) -> None:
+        """Вставка ссылки в указанный файл."""
         query = "INSERT INTO links (id, short_code, original_url) VALUES (?, ?, ?)"
-        # Передаем 3 параметра, created_at заполнится сам
-        await self.execute_write(query, (link_id, short_code, original_url))
+        await self.execute_write(shard_name, query, (link_id, short_code, original_url))
 
-    async def get_original_url(self, short_code: str) -> Optional[str]:
-        """
-        Возвращает оригинальный URL по короткому коду или None.
-        """
+    async def get_original_url(self, shard_name: str, short_code: str) -> Optional[str]:
+        """Поиск ссылки в конкретном шарде."""
         query = "SELECT original_url FROM links WHERE short_code = ?"
-        row = await self.fetch_one(query, (short_code,))
-        
+        row = await self.fetch_one(shard_name, query, (short_code,))
         if row:
-            # row['original_url'] работает благодаря db.row_factory = aiosqlite.Row
             return row['original_url']
         return None
-    
-
-    async def create_shard_if_not_exists(self, shard_name: str):
-        """
-        Создает новый файл шарда и таблицу в нем, если файла нет.
-        """
-        new_db_path = os.path.join(os.path.dirname(self.default_shard_path), shard_name)
-        
-        if os.path.exists(new_db_path):
-            return  # Уже создан, выходим
-
-        print(f"[STORAGE] Pre-allocating new shard: {shard_name}")
-        async with aiosqlite.connect(new_db_path) as db:
-            # Включаем WAL сразу
-            await db.execute("PRAGMA journal_mode=WAL;")
-            await db.execute("PRAGMA synchronous=NORMAL;")
-            
-            # Создаем таблицу
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS links (
-                    id INTEGER PRIMARY KEY,
-                    short_code TEXT UNIQUE,
-                    original_url TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            await db.commit()
