@@ -1,5 +1,5 @@
 # 1. Берем легкий образ Python
-FROM python:3.14-slim
+FROM python:3.11-slim
 
 # 2. Отключаем буферизацию вывода (чтобы логи видеть сразу)
 ENV PYTHONUNBUFFERED=1

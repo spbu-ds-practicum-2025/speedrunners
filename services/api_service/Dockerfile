@@ -1,6 +1,6 @@
 # services/api_service/Dockerfile
 
-FROM python:3.14-slim
+FROM python:3.11-slim
 
 # Отключаем буферизацию (чтобы логи летели в консоль сразу)
 ENV PYTHONUNBUFFERED=1
