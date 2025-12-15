@@ -5,7 +5,13 @@ from contextlib import asynccontextmanager
 
 from storage import AsyncStorage
 from sharding import get_target_shard, should_preallocate
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 # ТЕПЕРЬ мы работаем с ПАПКОЙ, а не одним файлом
 # Если запускаем локально, данные будут в папке 'data'
 DATA_DIR = os.getenv("DATA_DIR", "data")

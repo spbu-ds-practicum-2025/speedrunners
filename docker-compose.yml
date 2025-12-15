@@ -1,9 +1,6 @@
 services:
-  # ==========================================
-  # СЕРВИС 1: ID Generator
-  # ==========================================
   id_generator:
-    # Имя контейнера в системе (чтобы проще искать в логах)
+
     container_name: compact_id_gen
     
     # Откуда брать инструкцию по сборке
@@ -14,9 +11,7 @@ services:
     # Какие порты открыть наружу (Хост:Контейнер)
     ports:
       - "8000:8000"
-    
-    # ТОМА (Volumes) - Наша магия сохранения данных
-    # Папка ./data на твоем ноутбуке связывается с /app/data в контейнере
+
     volumes:
       - ./services/data:/app/data
     
@@ -30,14 +25,14 @@ services:
     ports:
       - "8001:8001" # Router будет доступен на порту 8001
     volumes:
-      # Подключаем папку data, так как Роутер должен писать в БД
       - ./services/data:/app/data
+    environment:
+      - SHARD_LIMIT=100
     restart: always
 
   api_service:
     container_name: compact_api
     build: 
-      # Важно: путь должен вести туда, где лежит Dockerfile API
       context: ./services/api_service 
     ports:
       - "8080:8080"  # Мы заходим на сайт через порт 8080
