@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
@@ -48,6 +49,28 @@ def encode_base62(num: int) -> str:
 class ShortenRequest(BaseModel):
     url: str
 
+# == Retry ==
+async def retry(client: httpx.AsyncClient, url: str, json: dict, retries: int = 3, delay: float = 0.5):
+    last_exc = None
+
+    for attempt in range(retries):
+        try:
+            resp = await client.post(url, json=json)
+
+            if resp.status_code == 200:
+                return resp
+
+            if resp.status_code in (409, 425, 503):
+                await asyncio.sleep(delay)
+                continue
+
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        except Exception as e:
+            last_exc = e
+            await asyncio.sleep(delay)
+
+    raise HTTPException(status_code = 503, detail="Service temporarily unavailable. Try again later.")
+
 # === ЭНДПОИНТЫ ===
 @app.get("/")
 def index():
@@ -69,12 +92,11 @@ async def shorten(req: ShortenRequest):
     }
 
     async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(f"{ROUTER_URL}/save_link", json=payload)
-            if resp.status_code != 200:
-                raise HTTPException(status_code=500, detail=f"Router error: {resp.text}")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Router unavailable: {e}")
+        await retry(
+            client,
+            f"{ROUTER_URL}/save_link",
+            json=payload
+        )
 
     return {
         "short_url": f"http://localhost:8080/{short_code}",
@@ -84,9 +106,17 @@ async def shorten(req: ShortenRequest):
 @app.get("/{short_code}")
 async def redirect_to_url(short_code: str):
     async with httpx.AsyncClient() as client:
-        # Запрашиваем оригинальную ссылку у Роутера
-        resp = await client.get(f"{ROUTER_URL}/get_link", params={"short_code": short_code})
-        
+        try:
+            resp = await client.get(
+                f"{ROUTER_URL}/get_link",
+                params={"short_code": short_code}
+            )
+        except httpx.RequestError:
+            raise HTTPException(
+                status_code=503,
+                detail="Service temporarily unavailable. Try again later."
+            )
+
         if resp.status_code == 404:
             raise HTTPException(status_code=404, detail="Link not found")
         
