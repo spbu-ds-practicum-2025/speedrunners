@@ -1,107 +1,123 @@
 import asyncio
 import logging
 import aiosqlite
+import os
+import random  # <--- Добавили для случайных пауз
 from typing import Any, List, Optional
 
-# Настраиваем логгер
 logger = logging.getLogger(__name__)
 
+
 class AsyncStorage:
-    def __init__(self, db_path: str):
+    def __init__(self, root_dir: str):
         """
-        Инициализация подключения к конкретному файлу шарда.
-        :param db_path: Путь к файлу базы данных (например, 'data/shard_0.db')
+        Инициализация менеджера хранилища.
         """
-        self.db_path = db_path
+        self.root_dir = root_dir
+        os.makedirs(self.root_dir, exist_ok=True)
+
+    def _get_db_path(self, shard_name: str) -> str:
+        return os.path.join(self.root_dir, shard_name)
 
     async def _init_pragmas(self, db: aiosqlite.Connection):
-        """
-        Применение оптимизаций SQLite для высокой производительности и конкурентности.
-        """
-        # WAL режим
+        """Оптимизации SQLite."""
         await db.execute("PRAGMA journal_mode=WAL;")
-        # Баланс между скоростью и надежностью
         await db.execute("PRAGMA synchronous=NORMAL;")
-        # Увеличенный кэш
         await db.execute("PRAGMA cache_size=-64000;")
-        # Таймаут на уровне драйвера
-        await db.execute("PRAGMA busy_timeout=5000;")
+        # Увеличиваем таймаут драйвера до 10 секунд
+        await db.execute("PRAGMA busy_timeout=10000;")
 
-    async def execute_write(self, query: str, params: tuple = ()) -> None:
+    async def create_new_shard(self, shard_name: str):
+        """Создание нового файла."""
+        db_path = self._get_db_path(shard_name)
+
+        if os.path.exists(db_path):
+            logger.info(f"[STORAGE] Shard {shard_name} exists.")
+        else:
+            logger.info(f"[STORAGE] Creating NEW shard: {shard_name}")
+
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA synchronous=NORMAL;")
+            await db.execute("""
+                             CREATE TABLE IF NOT EXISTS links
+                             (
+                                 id
+                                 INTEGER
+                                 PRIMARY
+                                 KEY,
+                                 short_code
+                                 TEXT
+                                 UNIQUE
+                                 NOT
+                                 NULL,
+                                 original_url
+                                 TEXT
+                                 NOT
+                                 NULL,
+                                 created_at
+                                 TIMESTAMP
+                                 DEFAULT
+                                 CURRENT_TIMESTAMP
+                             );
+                             """)
+            await db.commit()
+
+    async def execute_write(self, shard_name: str, query: str, params: tuple = ()) -> None:
         """
-        Выполнение записи с механизмом повторных попыток при блокировке.
+        Запись с усиленной защитой от блокировок (High Concurrency).
         """
-        retries = 5
-        delay = 0.05  # 50 мс
+        db_path = self._get_db_path(shard_name)
+
+        # НАСТРОЙКИ ДЛЯ СТРЕСС-ТЕСТА (50 потоков)
+        retries = 30  # Пытаемся 30 раз (раньше было 5)
+        base_delay = 0.1  # Минимальная пауза
 
         for attempt in range(1, retries + 1):
             try:
-                async with aiosqlite.connect(self.db_path) as db:
+                async with aiosqlite.connect(db_path) as db:
                     await self._init_pragmas(db)
                     await db.execute(query, params)
                     await db.commit()
-                    return  # Успех
+                    return  # Успех!
 
             except aiosqlite.OperationalError as e:
-                # Если база занята (LOCKED), ждем и пробуем снова
-                if "database is locked" in str(e) or "busy" in str(e).lower():
-                    if attempt < retries:
-                        logger.warning(
-                            f"Database {self.db_path} locked. Retry {attempt}/{retries}..."
-                        )
-                        await asyncio.sleep(delay)
-                    else:
-                        logger.error(f"Failed to write to {self.db_path} after retries.")
-                        raise e
-                else:
-                    raise e
+                is_locked = "database is locked" in str(e) or "busy" in str(e).lower()
 
-    async def fetch_one(self, query: str, params: tuple = ()) -> Optional[Any]:
+                if is_locked:
+                    if attempt < retries:
+                        # JITTER: Случайная пауза, чтобы потоки не бились синхронно
+                        sleep_time = base_delay + random.uniform(0.05, 0.25)
+
+                        logger.warning(
+                            f"LOCKED {shard_name}. Try {attempt}/{retries}. Sleep {sleep_time:.2f}s"
+                        )
+                        await asyncio.sleep(sleep_time)
+                    else:
+                        logger.error(f"GAVE UP writing to {shard_name} after {retries} attempts.")
+                        raise e  # Всё, сдаемся
+                else:
+                    raise e  # Ошибка SQL (синтаксис и т.д.)
+
+    async def fetch_one(self, shard_name: str, query: str, params: tuple = ()) -> Optional[Any]:
         """Чтение одной строки."""
-        async with aiosqlite.connect(self.db_path) as db:
+        db_path = self._get_db_path(shard_name)
+        if not os.path.exists(db_path):
+            return None
+
+        async with aiosqlite.connect(db_path) as db:
             await self._init_pragmas(db)
             db.row_factory = aiosqlite.Row
             async with db.execute(query, params) as cursor:
                 return await cursor.fetchone()
 
-    async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
-        """Чтение всех строк."""
-        async with aiosqlite.connect(self.db_path) as db:
-            await self._init_pragmas(db)
-            db.row_factory = aiosqlite.Row
-            async with db.execute(query, params) as cursor:
-                return await cursor.fetchall()
-
-    async def initialize_table(self):
-        """
-        Создает таблицу links.
-        """
-        query = """
-        CREATE TABLE IF NOT EXISTS links (
-            id INTEGER PRIMARY KEY,           -- Тот самый ID от генератора
-            short_code TEXT UNIQUE NOT NULL,  -- Уникальный код (abc1)
-            original_url TEXT NOT NULL,       -- Длинная ссылка
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- Дата создания
-        );
-        """
-        await self.execute_write(query)
-
-    async def insert_link(self, link_id: int, short_code: str, original_url: str) -> None:
-        """
-        Вставка новой записи с указанием ID.
-        """
+    async def insert_link(self, shard_name: str, link_id: int, short_code: str, original_url: str) -> None:
         query = "INSERT INTO links (id, short_code, original_url) VALUES (?, ?, ?)"
-        # Передаем 3 параметра, created_at заполнится сам
-        await self.execute_write(query, (link_id, short_code, original_url))
+        await self.execute_write(shard_name, query, (link_id, short_code, original_url))
 
-    async def get_original_url(self, short_code: str) -> Optional[str]:
-        """
-        Возвращает оригинальный URL по короткому коду или None.
-        """
+    async def get_original_url(self, shard_name: str, short_code: str) -> Optional[str]:
         query = "SELECT original_url FROM links WHERE short_code = ?"
-        row = await self.fetch_one(query, (short_code,))
-        
+        row = await self.fetch_one(shard_name, query, (short_code,))
         if row:
-            # row['original_url'] работает благодаря db.row_factory = aiosqlite.Row
             return row['original_url']
         return None
