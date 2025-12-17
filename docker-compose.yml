@@ -17,7 +17,7 @@ services:
       context: ./services/router_service
     # ports УБИРАЕМ! Доступ только внутри сети Docker.
     deploy:
-      replicas: 2  # <-- Запускаем 2 экземпляра!
+      replicas: 3
     volumes:
       - ./services/data:/app/data # Общая папка с файлами БД
     environment:
@@ -31,7 +31,7 @@ services:
       context: ./services/api_service
     # ports УБИРАЕМ! Теперь вход только через Nginx.
     deploy:
-      replicas: 2  # <-- Запускаем 2 экземпляра!
+      replicas: 5  # <-- Запускаем 2 экземпляра!
     depends_on:
       - id_generator
       - router_service

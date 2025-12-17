@@ -27,10 +27,28 @@ class LinkSchema(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # При старте создаем первый шард (shard_0.db) физически
+    # STARTUP
     await storage.create_new_shard("shard_0.db")
     print(f"Storage initialized. Root dir: {DATA_DIR}")
-    yield
+    
+    yield  # <-- Тут работает приложение
+    
+    # SHUTDOWN (Добавлено!)
+    print("Shutting down router...")
+
+        # Пытаемся слить данные для первых 5 шардов (или сколько их там)
+    for i in range(5):
+        try:
+            await storage.force_checkpoint(f"shard_{i}.db")
+        except:
+            pass
+
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     # При старте создаем первый шард (shard_0.db) физически
+#     await storage.create_new_shard("shard_0.db")
+#     print(f"Storage initialized. Root dir: {DATA_DIR}")
+#     yield
 
 app = FastAPI(lifespan=lifespan, title="Router Service")
 
@@ -71,3 +89,15 @@ async def get_link(short_code: str):
         raise HTTPException(status_code=404, detail="Link not found in shard_0")
     
     return {"original_url": url}
+
+@app.post("/admin/fix_wal")
+async def fix_wal():
+    """Ручной запуск чекпоинта для всех шардов"""
+    results = []
+    # Пробежимся по файлам в папке data
+    files = os.listdir(DATA_DIR)
+    for f in files:
+        if f.endswith(".db"):
+            await storage.force_checkpoint(f)
+            results.append(f)
+    return {"status": "ok", "fixed": results}

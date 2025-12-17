@@ -91,7 +91,7 @@ async def shorten(req: ShortenRequest):
         "original_url": req.url # Важно: Роутер ждет original_url
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         await retry(
             client,
             f"{ROUTER_URL}/save_link",
@@ -105,7 +105,7 @@ async def shorten(req: ShortenRequest):
 
 @app.get("/{short_code}")
 async def redirect_to_url(short_code: str):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             resp = await client.get(
                 f"{ROUTER_URL}/get_link",
