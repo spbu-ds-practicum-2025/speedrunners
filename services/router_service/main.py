@@ -20,9 +20,10 @@ DATA_DIR = os.getenv("DATA_DIR", "data")
 storage = AsyncStorage(DATA_DIR)
 
 class LinkSchema(BaseModel):
-    id: int           
+    id: int
     short_code: str
     original_url: str
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,6 +56,7 @@ async def save_link(link: LinkSchema, background_tasks: BackgroundTasks):
     except Exception as e:
         print(f"[ROUTER] Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.get("/get_link")
 async def get_link(short_code: str):

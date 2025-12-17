@@ -2,30 +2,301 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Сокращатель ссылок</title>
+    <title>Speedrunners · URL Shortener</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a, #020617);
+            font-family: 'Segoe UI', sans-serif;
+            color: #e5e7eb;
+            overflow: hidden;
+        }
+
+        canvas#snow {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .header {
+            position: fixed;
+            top: 20px;
+            left: 30px;
+            z-index: 10;
+        }
+
+        .team-name {
+            font-weight: 700;
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        .team-panel {
+            margin-top: 10px;
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(8px);
+            border-radius: 14px;
+            padding: 0 18px;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: 0.4s;
+        }
+
+        .team-panel.open {
+            max-height: 220px;
+            padding: 14px 18px;
+            opacity: 1;
+        }
+
+        .wrapper {
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(12px);
+            padding: 32px 42px;
+            border-radius: 22px;
+            width: 460px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+            z-index: 1;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 26px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: none;
+        }
+
+        button {
+            padding: 12px 18px;
+            border-radius: 12px;
+            border: none;
+            background: #6366f1;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .loader {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 18px auto 0;
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .result-row {
+            margin-top: 20px;
+        }
+
+        .result-left {
+            word-break: break-all;
+        }
+
+        #result {
+            margin: 0;
+        }
+
+        #error {
+            margin-top: 10px;
+            text-align: center;
+            color: #f87171;
+            font-size: 14px;
+            display: none;
+        }
+
+        #copyBtn {
+            display: none;
+            margin-top: 8px;
+            background: #22c55e;
+            color: #022c22;
+        }
+
+        label {
+            display: none; /* скрываем, но для accessibility */
+        }
+    </style>
 </head>
 <body>
-    <h1>URL Shortener</h1>
 
-    <input id="urlInput" type="text" placeholder="Введите длинную ссылку" style="width: 300px;">
-    <button onclick="shorten()">Сократить</button>
+<canvas id="snow"></canvas>
 
-    <p id="result"></p>
+<div class="header">
+    <div class="team-name" onclick="toggleTeam()">speedrunners</div>
+    <div class="team-panel" id="teamPanel">
+        <p><strong>Team Lead / Fullstack</strong><br>Кирющенков Александр Евгеньевич</p>
+        <p><strong>Backend Developer</strong><br>Шарипов Анушервон Абдусаторович</p>
+        <p><strong>Fullstack Developer</strong><br>Пахнушева Алёна Вадимовна</p>
+    </div>
+</div>
 
-    <script>
-        async function shorten() {
-            const input = document.getElementById("urlInput").value;
+<div class="wrapper">
+    <div class="card">
+        <h1>URL Shortener</h1>
 
-            const response = await fetch("/shorten", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ url: input })
-            });
+        <div class="input-group">
+            <label for="urlInput">Введите ссылку</label>
+            <input id="urlInput" placeholder="Вставь длинную ссылку">
+            <button onclick="shorten()">Сократить</button>
+        </div>
 
-            const data = await response.json();
-            document.getElementById("result").innerText =
-                "Короткая ссылка: " + data.short_url;
+        <div class="loader" id="loader"></div>
+
+        <div class="result-row">
+            <div class="result-left">
+                <p id="result"></p>
+                <div id="error"></div>
+                <button id="copyBtn" onclick="copyToClipboard()">Копировать</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// === Интерфейс ===
+const loader = document.getElementById("loader");
+const result = document.getElementById("result");
+const error = document.getElementById("error");
+const copyBtn = document.getElementById("copyBtn");
+const teamPanel = document.getElementById("teamPanel");
+
+function toggleTeam() {
+    teamPanel.classList.toggle("open");
+}
+
+async function shorten() {
+    const input = document.getElementById("urlInput").value;
+    if (!input) return;
+
+    loader.style.display = "block";
+    result.textContent = "";
+    error.style.display = "none";
+    copyBtn.style.display = "none";
+
+    try {
+        const response = await fetch("/shorten", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ url: input })
+        });
+
+        if (!response.ok) {
+            error.textContent = "Ошибка при сокращении ссылки";
+            error.style.display = "block";
+            return;
         }
-    </script>
+
+        const data = await response.json();
+        result.textContent = "Короткая ссылка: " + data.short_url;
+
+        copyBtn.style.display = "block";
+        copyBtn.dataset.link = data.short_url;
+
+    } catch (e) {
+        error.textContent = "Ошибка при сокращении ссылки";
+        error.style.display = "block";
+    } finally {
+        loader.style.display = "none";
+    }
+}
+
+function copyToClipboard() {
+    navigator.clipboard.writeText(copyBtn.dataset.link);
+    copyBtn.textContent = "Скопировано ✓";
+    setTimeout(() => copyBtn.textContent = "Копировать", 1500);
+}
+
+// === Снег ===
+const canvas = document.getElementById("snow");
+const ctx = canvas.getContext("2d");
+let W = canvas.width = window.innerWidth;
+let H = canvas.height = window.innerHeight;
+
+window.addEventListener("resize", () => {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+});
+
+const snowflakes = [];
+const maxFlakes = 150;
+
+for (let i = 0; i < maxFlakes; i++) {
+    snowflakes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 4 + 1,
+        d: Math.random() * maxFlakes,
+        speed: Math.random() + 0.5 // исправлено ESLint предупреждение
+    });
+}
+
+function drawSnow() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    for (let i = 0; i < snowflakes.length; i++) {
+        const f = snowflakes[i];
+        ctx.moveTo(f.x, f.y);
+        ctx.arc(f.x, f.y, f.r, 0, Math.PI*2, true);
+    }
+    ctx.fill();
+    moveSnow();
+}
+
+let angle = 0;
+function moveSnow() {
+    angle += 0.01;
+    for (let i = 0; i < snowflakes.length; i++) {
+        const f = snowflakes[i];
+        f.y += Math.cos(angle + f.d) + f.speed;
+        f.x += Math.sin(angle) * 0.5;
+
+        if (f.y > H) {
+            f.y = -f.r;
+            f.x = Math.random() * W;
+        }
+        if (f.x > W) f.x = 0;
+        if (f.x < 0) f.x = W;
+    }
+}
+
+function animate() {
+    drawSnow();
+    requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+
 </body>
 </html>

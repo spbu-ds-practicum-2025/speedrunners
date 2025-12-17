@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class AsyncStorage:
     def __init__(self, root_dir: str):
         """
