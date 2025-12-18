@@ -3,12 +3,13 @@ import os
 DATA_DIR = "data"
 STATE_FILE = os.path.join(DATA_DIR, "server_state.wal")
 
+
 class StateManager:
     """
     Менеджер состояний для ID Gen.
     Работает ТОЛЬКО с диском. Никакой сети.
     """
-    
+
     def __init__(self, filepath: str = STATE_FILE):
         self.filepath = filepath
 

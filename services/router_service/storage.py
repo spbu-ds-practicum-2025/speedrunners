@@ -3,9 +3,10 @@ import logging
 import aiosqlite
 import os
 import random
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
 
 class AsyncStorage:
     def __init__(self, root_dir: str):
@@ -22,19 +23,21 @@ class AsyncStorage:
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA synchronous=NORMAL;")
         # Важно: если база занята, драйвер сам ждет до 10 сек
-        await db.execute("PRAGMA busy_timeout=10000;") 
+        await db.execute("PRAGMA busy_timeout=10000;")
         await db.execute("PRAGMA wal_autocheckpoint=100")
 
     async def create_table_if_missing(self, db: aiosqlite.Connection):
         """Создает таблицу, если её нет (Self-healing)."""
-        await db.execute("""
+        await db.execute(
+            """
             CREATE TABLE IF NOT EXISTS links (
                 id INTEGER PRIMARY KEY,
                 short_code TEXT UNIQUE NOT NULL,
                 original_url TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
+        """
+        )
         await db.commit()
 
     async def create_new_shard(self, shard_name: str):
@@ -46,22 +49,24 @@ class AsyncStorage:
         async with self._write_lock:
             async with aiosqlite.connect(db_path) as db:
                 await self._init_pragmas(db)
-                await db.execute("""
+                await db.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS links (
                         id INTEGER PRIMARY KEY,
                         short_code TEXT UNIQUE NOT NULL,
                         original_url TEXT NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
-                """)
+                """
+                )
                 await db.commit()
 
-    
-
-    async def insert_link(self, shard_name: str, link_id: int, short_code: str, original_url: str) -> None:
+    async def insert_link(
+        self, shard_name: str, link_id: int, short_code: str, original_url: str
+    ) -> None:
         db_path = self._get_db_path(shard_name)
         query = "INSERT INTO links (id, short_code, original_url) VALUES (?, ?, ?)"
-        
+
         # 1. Захватываем внутренний замок (очередь внутри питона)
         async with self._write_lock:
             # 2. Пытаемся записать в файл с механизмом Retry
@@ -73,7 +78,7 @@ class AsyncStorage:
                         await self._init_pragmas(db)
                         await db.execute(query, (link_id, short_code, original_url))
                         await db.commit()
-                        return # Успех
+                        return  # Успех
 
                 except Exception as e:
                     # === ВОТ ОНО: ЛЕЧЕНИЕ ===
@@ -90,7 +95,9 @@ class AsyncStorage:
                             sleep_time = 0.1 + random.uniform(0.05, 0.5)
                             await asyncio.sleep(sleep_time)
                         else:
-                            logger.error(f"Failed to write to {shard_name} after retries.")
+                            logger.error(
+                                f"Failed to write to {shard_name} after retries."
+                            )
                             raise e
                     else:
                         raise e
@@ -105,12 +112,14 @@ class AsyncStorage:
             async with aiosqlite.connect(db_path) as db:
                 await self._init_pragmas(db)
                 db.row_factory = aiosqlite.Row
-                async with db.execute("SELECT original_url FROM links WHERE short_code = ?", (short_code,)) as cursor:
+                async with db.execute(
+                    "SELECT original_url FROM links WHERE short_code = ?", (short_code,)
+                ) as cursor:
                     row = await cursor.fetchone()
-                    return row['original_url'] if row else None
+                    return row["original_url"] if row else None
         except Exception:
             return None
-        
+
     async def force_checkpoint(self, shard_name: str):
         """Принудительно слить WAL в БД и очистить временные файлы."""
         db_path = self._get_db_path(shard_name)

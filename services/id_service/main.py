@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from state_manager import StateManager
-import asyncio # <--- 1. Импорт
+import asyncio  # <--- 1. Импорт
 
 app = FastAPI(title="ID Generator Service")
 state = StateManager()
@@ -9,11 +9,13 @@ state = StateManager()
 # 2. Создаем глобальный замок
 lock = asyncio.Lock()
 
+
 class AllocateRequest(BaseModel):
     size: int
 
+
 @app.post("/allocate")
-async def allocate_range(request: AllocateRequest): # <--- 3. Добавь async!
+async def allocate_range(request: AllocateRequest):  # <--- 3. Добавь async!
     if request.size <= 0:
         raise HTTPException(status_code=400, detail="Size must be positive")
 
@@ -27,7 +29,4 @@ async def allocate_range(request: AllocateRequest): # <--- 3. Добавь async
 
     print(f"Allocated range: {new_start} - {new_end}")
 
-    return {
-        "start": new_start,
-        "end": new_end
-    }
+    return {"start": new_start, "end": new_end}

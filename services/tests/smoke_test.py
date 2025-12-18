@@ -3,11 +3,12 @@ import time
 import sys
 
 # Теперь стучимся на 80 порт (по умолчанию http://localhost)
-BASE_URL = "http://localhost" 
+BASE_URL = "http://localhost"
+
 
 def check_system():
     print("🚬 Запуск дымового теста (Smoke Test)...")
-    
+
     try:
         # 1. Проверка главной страницы
         print("1. Запрос главной страницы...", end=" ")
@@ -22,7 +23,7 @@ def check_system():
         print("2. Создание короткой ссылки...", end=" ")
         payload = {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
         r = httpx.post(f"{BASE_URL}/shorten", json=payload)
-        
+
         if r.status_code == 200:
             data = r.json()
             short_code = data["short_code"]
@@ -35,7 +36,7 @@ def check_system():
         print(f"3. Проверка редиректа /{short_code}...", end=" ")
         # allow_redirects=False, чтобы увидеть 307, а не улететь на ютуб
         r = httpx.get(f"{BASE_URL}/{short_code}", follow_redirects=False)
-        
+
         if r.status_code == 307:
             print(f"✅ OK (Location: {r.headers['location']})")
         else:
@@ -48,7 +49,8 @@ def check_system():
         print(f"\n❌ Критическая ошибка: {e}")
         sys.exit(1)
 
+
 if __name__ == "__main__":
     # Даем системе пару секунд на старт после docker-compose up
-    time.sleep(2) 
+    time.sleep(2)
     check_system()
