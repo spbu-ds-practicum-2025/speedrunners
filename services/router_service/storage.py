@@ -25,6 +25,18 @@ class AsyncStorage:
         await db.execute("PRAGMA busy_timeout=10000;") 
         await db.execute("PRAGMA wal_autocheckpoint=100")
 
+    async def create_table_if_missing(self, db: aiosqlite.Connection):
+        """Создает таблицу, если её нет (Self-healing)."""
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS links (
+                id INTEGER PRIMARY KEY,
+                short_code TEXT UNIQUE NOT NULL,
+                original_url TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        await db.commit()
+
     async def create_new_shard(self, shard_name: str):
         db_path = self._get_db_path(shard_name)
         if os.path.exists(db_path):
@@ -44,6 +56,8 @@ class AsyncStorage:
                 """)
                 await db.commit()
 
+    
+
     async def insert_link(self, shard_name: str, link_id: int, short_code: str, original_url: str) -> None:
         db_path = self._get_db_path(shard_name)
         query = "INSERT INTO links (id, short_code, original_url) VALUES (?, ?, ?)"
@@ -62,6 +76,13 @@ class AsyncStorage:
                         return # Успех
 
                 except Exception as e:
+                    # === ВОТ ОНО: ЛЕЧЕНИЕ ===
+                    # if "no such table" in str(e):
+                    #     logger.warning(f"[STORAGE] Table missing in {shard_name}. Fixing...")
+                    #     async with aiosqlite.connect(db_path) as db:
+                    #         await self.create_table_if_missing(db)
+                    #     continue # Пробуем записать снова в следующем цикле
+
                     is_locked = "locked" in str(e) or "busy" in str(e).lower()
                     if is_locked:
                         if attempt < retries:

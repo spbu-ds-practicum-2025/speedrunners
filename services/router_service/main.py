@@ -25,6 +25,31 @@ class LinkSchema(BaseModel):
     original_url: str
 
 
+BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+def encode_base62(num: int) -> str:
+    if num == 0: return "0"
+    arr = []
+    base = 62
+    while num:
+        num, rem = divmod(num, base)
+        arr.append(BASE62[rem])
+    arr.reverse()
+    return "".join(arr)
+
+def decode_base62(string: str) -> int:
+    base = len(BASE62)
+    strlen = len(string)
+    num = 0
+    idx = 0
+    for char in string:
+        power = (strlen - (idx + 1))
+        try:
+            num += BASE62.index(char) * (base ** power)
+        except ValueError:
+            raise ValueError(f"Invalid character '{char}' in short code")
+        idx += 1
+    return num
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # STARTUP
@@ -78,26 +103,24 @@ async def save_link(link: LinkSchema, background_tasks: BackgroundTasks):
 
 @app.get("/get_link")
 async def get_link(short_code: str):
-    """
-    Поиск ссылки.
-    MVP: Ищем только в shard_0.db (так как пока нет Scatter/Gather).
-    """
-    # Ищем в нулевом шарде
-    url = await storage.get_original_url("shard_0.db", short_code)
-    
-    if url is None:
-        raise HTTPException(status_code=404, detail="Link not found in shard_0")
-    
-    return {"original_url": url}
-
-@app.post("/admin/fix_wal")
-async def fix_wal():
-    """Ручной запуск чекпоинта для всех шардов"""
-    results = []
-    # Пробежимся по файлам в папке data
-    files = os.listdir(DATA_DIR)
-    for f in files:
-        if f.endswith(".db"):
-            await storage.force_checkpoint(f)
-            results.append(f)
-    return {"status": "ok", "fixed": results}
+    try:
+        link_id = decode_base62(short_code)
+        target_shard = get_target_shard(link_id)
+        
+        # Пытаемся найти
+        url = await storage.get_original_url(target_shard, short_code)
+        
+        if url is None:
+            # Выбрасываем 404
+            raise HTTPException(status_code=404, detail=f"Link not found in {target_shard}")
+        
+        return {"original_url": url}
+        
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid short code format")
+    except HTTPException as http_exc:
+        # Пробрасываем HTTP исключения (404) дальше, не ловя их в общий except
+        raise http_exc
+    except Exception as e:
+        print(f"Read Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")

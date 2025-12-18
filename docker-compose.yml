@@ -17,11 +17,11 @@ services:
       context: ./services/router_service
     # ports УБИРАЕМ! Доступ только внутри сети Docker.
     deploy:
-      replicas: 3
+      replicas: 2
     volumes:
       - ./services/data:/app/data # Общая папка с файлами БД
     environment:
-      - SHARD_LIMIT=1000000 # Вернем нормальный лимит
+      - SHARD_LIMIT=1000000
     restart: always
 
   # === API SERVICE (КЛАСТЕР x2) ===
@@ -31,7 +31,7 @@ services:
       context: ./services/api_service
     # ports УБИРАЕМ! Теперь вход только через Nginx.
     deploy:
-      replicas: 5  # <-- Запускаем 2 экземпляра!
+      replicas: 2
     depends_on:
       - id_generator
       - router_service

@@ -1,7 +1,7 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import httpx
 import asyncio
 
@@ -45,9 +45,23 @@ def encode_base62(num: int) -> str:
     arr.reverse()
     return "".join(arr)
 
+def decode_base62(string: str) -> int:
+    base = len(BASE62)
+    strlen = len(string)
+    num = 0
+    idx = 0
+    for char in string:
+        power = (strlen - (idx + 1))
+        try:
+            num += BASE62.index(char) * (base ** power)
+        except ValueError:
+            raise ValueError(f"Invalid character '{char}' in short code")
+        idx += 1
+    return num
+
 # === МОДЕЛИ ===
 class ShortenRequest(BaseModel):
-    url: str
+    url: str = Field(..., min_length=1, description="URL must not be empty")
 
 # == Retry ==
 async def retry(client: httpx.AsyncClient, url: str, json: dict, retries: int = 3, delay: float = 0.5):
@@ -78,6 +92,11 @@ def index():
 
 @app.post("/shorten")
 async def shorten(req: ShortenRequest):
+
+    if not req.url.startswith("http"):
+        # Если юзер забыл http://, можно либо добавить, либо кинуть ошибку.
+        # Для строгости кинем ошибку 400 (Bad Request)
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
     # 1. Получаем ID по сети (или из буфера)
     link_id = await id_buffer.get_one_id()
 
