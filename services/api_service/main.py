@@ -118,7 +118,7 @@ async def shorten(req: ShortenRequest):
         )
 
     return {
-        "short_url": f"http://localhost:8080/{short_code}",
+        "short_url": f"http://localhost:80/{short_code}",
         "short_code": short_code
     }
 
