@@ -16,8 +16,8 @@
 │   ├── api_service/            # Public API (FastAPI, Frontend UI, In-memory ID Buffer)
 │   ├── id_service/             # ID Generator (Stateful сервис выдачи диапазонов)
 │   ├── router_service/         # Router Service (Логика шардирования и управления SQLite)
-│   └── data/                   # Volume для физического хранения файлов шардов (.db)
-├── tests/                      # Скрипты для тестирования данных
+│   ├── data/                   # Volume для физического хранения файлов шардов (.db)
+│   └── tests/                      # Скрипты для тестирования данных
 ├── docs/                       # ТР (техническое решение), архитектура
 ├── .github/                    # Шаблоны задач и настройки CI/CD
 ├── docker-compose.yml          # Конфигурация для локального запуска
@@ -47,9 +47,8 @@
    ```
 
 2. Соберите и запустите кластер:
-   *Мы запускаем 2 реплики API Service для демонстрации балансировки и 1 экземпляр Router Service (архитектура Single Writer для SQLite).*
    ```bash
-   docker compose up -d --build --scale api_service=2
+   docker compose -f 'docker-compose.yml' up -d --build  
    ```
 
 3. Откройте веб-интерфейс в браузере:
@@ -59,13 +58,13 @@
 
 4. Проверка работоспособности (Smoke Test):
    ```bash
-   python3 smoke_test.py
+   python3 ./services/tests/smoke_test.py
    ```
 
 5. Запуск нагрузочного тестирования (Stress Test):
    *Проверяет конкурентную запись в БД (50 потоков, 2500 запросов).*
    ```bash
-   python3 services/router_service/stress_test.py
+   python3 services/tests/stress_test.py
    ```
 
 ### Остановка системы
