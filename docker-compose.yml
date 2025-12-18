@@ -1,0 +1,53 @@
+services:
+  # === ID GENERATOR (Остается один, он Singleton) ===
+  id_generator:
+    container_name: compact_id_gen
+    build: 
+      context: ./services/id_service
+    ports:
+      - "8000:8000" # Оставляем для дебага, но в идеале тоже скрыть
+    volumes:
+      - ./services/data:/app/data
+    restart: always
+
+  # === ROUTER SERVICE (КЛАСТЕР x2) ===
+  router_service:
+    # container_name УБИРАЕМ! Нельзя дать одно имя двум контейнерам.
+    build: 
+      context: ./services/router_service
+    # ports УБИРАЕМ! Доступ только внутри сети Docker.
+    deploy:
+      replicas: 2
+    volumes:
+      - ./services/data:/app/data # Общая папка с файлами БД
+    environment:
+      - SHARD_LIMIT=1000000
+    restart: always
+
+  # === API SERVICE (КЛАСТЕР x2) ===
+  api_service:
+    # container_name УБИРАЕМ!
+    build: 
+      context: ./services/api_service
+    # ports УБИРАЕМ! Теперь вход только через Nginx.
+    deploy:
+      replicas: 2
+    depends_on:
+      - id_generator
+      - router_service
+    environment:
+      # Важно: внутри докера имена сервисов остаются прежними
+      - ID_GEN_URL=http://id_generator:8000/allocate
+      - ROUTER_URL=http://router_service:8001
+    restart: always
+
+  # === NGINX (ВХОДНАЯ ДВЕРЬ) ===
+  nginx:
+    image: nginx:latest
+    container_name: compact_gateway
+    ports:
+      - "80:80"  # Весь трафик идет сюда (localhost:80)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api_service
